@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.animation as animation
 import logging
 logging.getLogger().setLevel(logging.CRITICAL)
 
@@ -111,9 +112,12 @@ def episode_to_iteration(dataframe):
     sim_df_iterations["pct_crashed"] = (sim_df_iterations["crash_count"] / sim_df_iterations["episodes"] * 100.0)
     
     # Create a simple moving average for completed laps, offtrack count, and crash count to reduce deviation
-    sim_df_iterations['pct_completed_laps_SMA'] = sim_df_iterations['pct_completed_laps'].rolling(window=3).mean()
-    sim_df_iterations['pct_offtrack_SMA'] = sim_df_iterations['pct_offtrack'].rolling(window=3).mean()
-    sim_df_iterations['pct_crashed_SMA'] = sim_df_iterations['pct_crashed'].rolling(window=3).mean()
+    try:
+        sim_df_iterations['pct_completed_laps_SMA'] = sim_df_iterations['pct_completed_laps'].rolling(window=3).mean()
+        sim_df_iterations['pct_offtrack_SMA'] = sim_df_iterations['pct_offtrack'].rolling(window=3).mean()
+        sim_df_iterations['pct_crashed_SMA'] = sim_df_iterations['pct_crashed'].rolling(window=3).mean()
+    except:
+        pass
 
     return sim_df_iterations
 
@@ -265,7 +269,7 @@ def plot_episode_end_status(df_slice_iterations1, df_slice_iterations2):
         plt.subplots_adjust(bottom=0.15)
         
         plt.yticks(np.arange(0, 105, step=10))
-        plt.show();
+        plt.show()
 
 def plot_lap_times(df_slice_1, df_slice_2, df_slice_eval):
     font_size=16
@@ -294,7 +298,7 @@ def plot_lap_times(df_slice_1, df_slice_2, df_slice_eval):
         ax2.set_ylabel('Time (milliseconds)', fontsize=font_size)
         ax2.set_title('Robomaker #2: Completed Lap Times Per Iteration', fontsize=20)
 
-    if df_slice_iterations1['complete_laps'].sum() > 0 or df_slice_iterations2['complete_laps'].sum() > 0:
+    if df_slice_1['complete_laps'].sum() > 0 or df_slice_2['complete_laps'].sum() > 0:
         plt.show
     else:
         print("No completed laps during training")
@@ -313,21 +317,28 @@ def plot_lap_times(df_slice_1, df_slice_2, df_slice_eval):
         ax1.set_title('Evaluation: Completed Lap Times Per Iteration', fontsize=20)
         plt.show
 
-def run_analysis():
+def run_notebook():
     # Get the Location of the Metrics Files
     run_env = 'run.env'
-    with open(run_env, 'r') as f:
-        for line in f.readlines():
+    system_env = 'system.env'
+    with open(run_env, 'r') as run:
+        for line in run.readlines():
             if "DR_LOCAL_S3_MODEL_PREFIX=" in line:
                 spl_pnt = '='
                 MODEL_PREFIX = line.partition(spl_pnt)[2]
                 MODEL_PREFIX = MODEL_PREFIX.replace('\n','')
-    print('Looking for logs in: %s' %MODEL_PREFIX)
+    with open(system_env, 'r') as sys:
+        for line in sys.readlines():
+            if "DR_LOCAL_S3_BUCKET=" in line:
+                spl_pnt = '='
+                BUCKET = line.partition(spl_pnt)[2]
+                BUCKET = BUCKET.replace('\n','')
+    print('Looking for logs in: data/minio/%s/%s/metrics/TrainingMetrics.json' % (BUCKET,MODEL_PREFIX))
     try:
-        metrics1_fname = 'data/minio/bucket/%s/metrics/TrainingMetrics.json' %MODEL_PREFIX
-        metrics2_fname = 'data/minio/bucket/%s/metrics/TrainingMetrics_1.json' %MODEL_PREFIX
+        metrics1_fname = 'data/minio/%s/%s/metrics/TrainingMetrics.json' %(BUCKET,MODEL_PREFIX)
+        metrics2_fname = 'data/minio/%s/%s/metrics/TrainingMetrics_1.json' %(BUCKET,MODEL_PREFIX)
     except:
-        print('No logs found in data/minio/bucket/%s/metrics/' %MODEL_PREFIX)
+        print('No logs found in data/minio/%s/%s/metrics/' %(BUCKET,MODEL_PREFIX))
 
     # Compile the Metrics Logs so They Can be Read by this Notebook
     with open(metrics1_fname, 'r') as file1:
