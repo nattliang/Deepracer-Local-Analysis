@@ -8,6 +8,7 @@ import matplotlib.animation as animation
 import logging
 logging.getLogger().setLevel(logging.CRITICAL)
 
+# Compile the Metrics Logs so They Can be Read by this Notebook
 def json_to_list(file):
     file = file.replace("{","[")
     file = file.replace("}","]")
@@ -28,12 +29,14 @@ def json_to_list(file):
     #print(file)
     return json.loads(file)
 
+# Find the Number of Episodes Per Iteration
 def find_episodes(data_list):
   for d in range(len(data_list)):
     if data_list[d][6] == 'evaluation':
       trial = int(data_list[d][5])
       return trial
       
+# Parse the Data 
 def parse_data(data_list, episodes_per_iteration):
     training = []
     evaluation = []
@@ -79,12 +82,16 @@ def parse_data(data_list, episodes_per_iteration):
             
     return [training, evaluation]
 
+# Convert Episode Data Into Iteration Data
 def episode_to_iteration(dataframe):
     sim_df_iterations = dataframe[dataframe["trial"] == 1][["iteration"]].copy()
     sim_df_iterations["avg_progress"] = dataframe.groupby("iteration")["progress"].transform("mean")
     sim_df_iterations["avg_reward"] = dataframe.groupby("iteration")["reward"].transform("mean")
-    sim_df_iterations["avg_elapsed_time"] = dataframe.groupby("iteration")["complete_time"].transform("mean")
-    sim_df_iterations["min_elapsed_time"] = dataframe.groupby("iteration")["complete_time"].transform("min")
+    try:
+        sim_df_iterations["avg_elapsed_time"] = dataframe.groupby("iteration")["complete_time"].transform("mean")
+        sim_df_iterations["min_elapsed_time"] = dataframe.groupby("iteration")["complete_time"].transform("min")
+    except:
+        pass
 
     episode_count = dataframe.groupby("iteration")["episode"].count()
     sim_df_iterations = pd.merge(sim_df_iterations,episode_count,on="iteration",how="outer")
