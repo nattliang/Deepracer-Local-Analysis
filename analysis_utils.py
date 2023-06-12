@@ -15,7 +15,8 @@ def find_episodes(metrics_list):
     if metrics_list[0][d]['phase'] == 'evaluation':
       trial = int(metrics_list[0][d]['trial'])
       return trial
-      
+
+
 # Parse the Data 
 def parse_data(all_metrics, episodes_per_iteration):
 
@@ -62,6 +63,7 @@ def parse_data(all_metrics, episodes_per_iteration):
                 evaluation_data.append([iteration, episode, reward, progress, elapsed_time, complete_time, trial, status])
 
     return [training_data, evaluation_data]
+
 
 # Convert Episode Data Into Iteration Data
 def episode_to_iteration(dataframe):
@@ -110,7 +112,58 @@ def episode_to_iteration(dataframe):
 
     return sim_df_iterations
 
-def plot_training_graph(df_slice_iterations, df_slice_e):
+
+def find_metrics(model_path=None):
+        # Get the Location of the Metrics Files
+    if model_path is None or model_path == '':
+        with open('run.env', 'r') as run:
+            for line in run.readlines():
+                if "DR_LOCAL_S3_MODEL_PREFIX=" in line:
+                    spl_pnt = '='
+                    MODEL_PREFIX = line.partition(spl_pnt)[2]
+                    MODEL_PREFIX = MODEL_PREFIX.replace('\n','')
+        with open('system.env', 'r') as sys:
+            for line in sys.readlines():
+                if "DR_LOCAL_S3_BUCKET=" in line:
+                    spl_pnt = '='
+                    BUCKET = line.partition(spl_pnt)[2]
+                    BUCKET = BUCKET.replace('\n','')
+        model_path = f'data/minio/{BUCKET}/{MODEL_PREFIX}'
+
+    print(f'Looking for logs in: {model_path}/metrics/')
+
+    metrics_fname = f'{model_path}/metrics/TrainingMetrics'
+    return metrics_fname
+
+
+def get_metrics_data(metrics_fname):
+    all_metrics = []
+
+    # Look for up to 10 robomaker workers
+    with open(f"{metrics_fname}.json") as metrics_json:
+        all_metrics.append(json.load(metrics_json)['metrics'])
+    for i in range(1, 10):
+        try:
+            with open(f"{metrics_fname}_{i}.json") as metrics_json:
+                all_metrics.append(json.load(metrics_json)['metrics'])
+        except FileNotFoundError:
+            break
+
+    # Find the Number of Episodes Per Iteration for Each Robomaker Container
+    episodes_per_iteration = find_episodes(all_metrics)
+
+    # Parse the Data
+    training_data, evaluation_data = parse_data(all_metrics, episodes_per_iteration)
+
+    # Convert to Dataframe
+    header = ['iteration', 'episode', 'reward', 'progress', 'elapsed_time', 'complete_time', 'trial', 'status']
+    sim_df = pd.DataFrame(training_data, columns=header)
+    sim_df_E = pd.DataFrame(evaluation_data, columns=header)
+
+    return sim_df, sim_df_E
+
+
+def plot_training_graph(df_slice_iterations, df_slice_e, save_as_png=False, save_dir=''):
 
     font_size=16
     if(len(df_slice_iterations)>0):
@@ -163,50 +216,57 @@ def plot_training_graph(df_slice_iterations, df_slice_e):
             plt.axhline(y=ymax_rewards,linestyle='dotted',linewidth=1.5,color='black')
             plt.gca().text(xmax_rewards*0.995, ymax_rewards*1.005, f'Max Rewards @ {xmax_rewards}', ha='right', va='bottom', size=font_size)
 
-        plt.show()
-        
-def plot_pct_competed_laps(df_slice_iterations1):
+        if save_as_png:
+            plt.savefig(f'{save_dir + "/" if save_dir != "" else ""}training_graph.png')
+        else:
+            plt.show()
+
+def plot_pct_competed_laps(df_slice_iterations, save_as_png=False, save_dir=''):
 
     font_size=16
-    if(len(df_slice_iterations1)>0):
+    if(len(df_slice_iterations)>0):
         fig = plt.figure(figsize=(24, 10))
         ax1 = plt.gca()
         
-        df_slice_iterations1.plot(kind='line',linestyle=(0,(1,1)),x='iteration',y='pct_completed_laps_SMA',label='Percent Completed Laps SMA',linewidth=3,color='dodgerblue',fontsize=font_size,ax=ax1)
-        df_slice_iterations1.plot(kind='line',linestyle='solid',x='iteration',y='avg_progress',label='Average Training Progress',linewidth=3,color='blue',fontsize=font_size,ax=ax1)
+        df_slice_iterations.plot(kind='line',linestyle=(0,(1,1)),x='iteration',y='pct_completed_laps_SMA',label='Percent Completed Laps SMA',linewidth=3,color='dodgerblue',fontsize=font_size,ax=ax1)
+        df_slice_iterations.plot(kind='line',linestyle='solid',x='iteration',y='avg_progress',label='Average Training Progress',linewidth=3,color='blue',fontsize=font_size,ax=ax1)
         
         ax1.legend().remove()
         ax1.set_xlabel(ax1.get_xlabel(), fontsize=font_size)
         ax1.set_ylabel('Percentage (%)', fontsize=font_size)
         ax1.set_title('Training: Avg. Progress and % Completed Laps', fontsize=20)
 
-        max_progress_iter = df_slice_iterations1['avg_progress'].idxmax()
+        max_progress_iter = df_slice_iterations['avg_progress'].idxmax()
         if (max_progress_iter >= 0):
-            xmax_progress = df_slice_iterations1['iteration'][max_progress_iter]
-            ymax_progress = df_slice_iterations1['avg_progress'].max()
+            xmax_progress = df_slice_iterations['iteration'][max_progress_iter]
+            ymax_progress = df_slice_iterations['avg_progress'].max()
             plt.axvline(x=xmax_progress,linestyle='dotted',linewidth=1.5,color='black')
             plt.axhline(y=ymax_progress,linestyle='dotted',linewidth=1.5,color='black')
             plt.gca().text(xmax_progress*0.995, ymax_progress*1.005, f'Max Train Progress @ {xmax_progress}', ha='right', va='bottom', size=font_size)
         
-        max_complete_laps_iter = df_slice_iterations1['pct_completed_laps_SMA'].idxmax()
+        max_complete_laps_iter = df_slice_iterations['pct_completed_laps_SMA'].idxmax()
         if (max_complete_laps_iter >= 0):
-            xmax_laps = df_slice_iterations1['iteration'][max_complete_laps_iter]
-            ymax_laps = df_slice_iterations1['pct_completed_laps_SMA'].max()
+            xmax_laps = df_slice_iterations['iteration'][max_complete_laps_iter]
+            ymax_laps = df_slice_iterations['pct_completed_laps_SMA'].max()
             plt.axvline(x=xmax_laps,linestyle='dotted',linewidth=1.5,color='black')
             plt.axhline(y=ymax_laps,linestyle='dotted',linewidth=1.5,color='black')
             plt.gca().text(xmax_laps*0.995, ymax_laps*1.005, f'Max Completed Laps SMA @ {xmax_laps}', ha='right', va='bottom', size=font_size)
 
         plt.yticks(np.arange(0, 105, step=10))
         
-        plt.plot([], [], ' ', label=f'Iterations: {df_slice_iterations1["iteration"].max()}')
+        plt.plot([], [], ' ', label=f'Iterations: {df_slice_iterations["iteration"].max()}')
         fig.legend(loc="lower center", borderaxespad=0.1, ncol=4, fontsize=14, title="Legend")
         plt.subplots_adjust(bottom=0.15)
         
         plt.yticks(np.arange(0, 105, step=10))
         plt.grid(axis='y')
-        plt.show()
-    
-def plot_episode_end_status(df_slice_iterations):
+        if save_as_png:
+            plt.savefig(f'{save_dir + "/" if save_dir != "" else ""}training_progress.png')
+        else:
+            plt.show()
+
+
+def plot_episode_end_status(df_slice_iterations, save_as_png=False, save_dir=''):
     font_size=16
     if(len(df_slice_iterations)>0):
         fig = plt.figure(figsize=(24, 10))
@@ -228,24 +288,31 @@ def plot_episode_end_status(df_slice_iterations):
         
         plt.yticks(np.arange(0, 105, step=10))
         plt.grid(axis='y')
-        plt.show()
+        if save_as_png:
+            plt.savefig(f'{save_dir + "/" if save_dir != "" else ""}training_end_status.png')
+        else:
+            plt.show()
 
-def plot_lap_times(df_slice, df_slice_eval):
+
+def plot_lap_times(df_slice, df_slice_eval, save_as_png=False, save_dir=''):
     font_size=16
     if df_slice['complete_laps'].sum() > 0:
-        df_slice_iterations1 = df_slice[df_slice["complete_laps"] > 0]
+        df_slice_iterations = df_slice[df_slice["complete_laps"] > 0]
         fig = plt.figure(figsize=(24, 10))
         ax1 = plt.gca()
-        df_slice_iterations1.plot(kind='line',linestyle='solid',x='iteration',y='avg_elapsed_time',label='Average Elapsed Time',linewidth=2,alpha=0.5,fontsize=font_size,ax=ax1)
+        df_slice_iterations.plot(kind='line',linestyle='solid',x='iteration',y='avg_elapsed_time',label='Average Elapsed Time',linewidth=2,alpha=0.5,fontsize=font_size,ax=ax1)
         ax1.set_xlabel(ax1.get_xlabel(), fontsize=20)
         ax1.set_ylabel(ax1.get_ylabel(), fontsize=20)
         ax1.set_title('Avg Elapsed Time', fontsize=20)
-        df_slice_iterations1.plot(kind='line',linestyle='solid',x='iteration',y='min_elapsed_time',label='Minimum Elapsed Time',linewidth=1,color='darkorange',fontsize=font_size,ax=ax1)
+        df_slice_iterations.plot(kind='line',linestyle='solid',x='iteration',y='min_elapsed_time',label='Minimum Elapsed Time',linewidth=1,color='darkorange',fontsize=font_size,ax=ax1)
         ax1.set_xlabel(ax1.get_xlabel(), fontsize=20)
         ax1.set_ylabel('Time (milliseconds)', fontsize=font_size)
         ax1.set_title('Training: Completed Lap Times Per Iteration', fontsize=20)
         plt.grid(axis='y')
-        plt.show
+        if save_as_png:
+            plt.savefig(f'{save_dir + "/" if save_dir != "" else ""}training_lap_times.png')
+        else:
+            plt.show()
     else:
         print("No completed laps during training")
     
@@ -262,56 +329,22 @@ def plot_lap_times(df_slice, df_slice_eval):
         ax1.set_ylabel('Time (milliseconds)', fontsize=font_size)
         ax1.set_title('Evaluation: Completed Lap Times Per Iteration', fontsize=20)
         plt.grid(axis='y')
-        plt.show
+        if save_as_png:
+            plt.savefig(f'{save_dir + "/" if save_dir != "" else ""}evaluation_lap_times.png')
+        else:
+            plt.show()
     else:
         print("No completed laps during evalution")
 
-def run_notebook(run_env='run.env'):
-    # Get the Location of the Metrics Files
-    system_env = 'system.env'
-    with open(run_env, 'r') as run:
-        for line in run.readlines():
-            if "DR_LOCAL_S3_MODEL_PREFIX=" in line:
-                spl_pnt = '='
-                MODEL_PREFIX = line.partition(spl_pnt)[2]
-                MODEL_PREFIX = MODEL_PREFIX.replace('\n','')
-    with open(system_env, 'r') as sys:
-        for line in sys.readlines():
-            if "DR_LOCAL_S3_BUCKET=" in line:
-                spl_pnt = '='
-                BUCKET = line.partition(spl_pnt)[2]
-                BUCKET = BUCKET.replace('\n','')
 
-    print(f'Looking for logs in: data/minio/{BUCKET}/{MODEL_PREFIX}/metrics/')
+def run_notebook(model_path=None):
 
-    metrics_fname = f'data/minio/{BUCKET}/{MODEL_PREFIX}/metrics//TrainingMetrics'
-    all_metrics = []
-
-    # Look for up to 10 robomaker workers
-    with open(f"{metrics_fname}.json") as metrics_json:
-        all_metrics.append(json.load(metrics_json)['metrics'])
-    for i in range(1, 10):
-        try:
-            with open(f"{metrics_fname}_{i}.json") as metrics_json:
-                all_metrics.append(json.load(metrics_json)['metrics'])
-        except FileNotFoundError:
-            break
-
-    # Find the Number of Episodes Per Iteration for Each Robomaker Container
-    episodes_per_iteration = find_episodes(all_metrics)
-    print(f'# of Episodes per Robomaker: {episodes_per_iteration}')
-
-    # Parse the Data
-    training_data, evaluation_data = parse_data(all_metrics, episodes_per_iteration)
-
-    # Convert to Dataframe
-    header = ['iteration', 'episode', 'reward', 'progress', 'elapsed_time', 'complete_time', 'trial', 'status']
-    sim_df = pd.DataFrame(training_data, columns=header)
-    sim_df_E = pd.DataFrame(evaluation_data, columns=header)
+    metrics_fname = find_metrics(model_path)
+    training_data, evaluation_data = get_metrics_data(metrics_fname)
 
     # Convert Episode Data into Iteration Data
-    sim_df_iterations = episode_to_iteration(sim_df)
-    sim_df_iterations_E = episode_to_iteration(sim_df_E)
+    sim_df_iterations = episode_to_iteration(training_data)
+    sim_df_iterations_E = episode_to_iteration(evaluation_data)
 
     # Plot Graphs
     plot_training_graph(sim_df_iterations, sim_df_iterations_E)
